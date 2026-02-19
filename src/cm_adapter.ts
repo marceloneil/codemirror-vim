@@ -113,11 +113,13 @@ function runHistoryCommand(cm: CodeMirror, revert: boolean) {
     cm.curOp.$changeStart = undefined;
   }
   (revert ? undo : redo)(cm.cm6);
-  let changeStartIndex = cm.curOp?.$changeStart;
-  // vim mode expects the changed text to be either selected or cursor placed at the start
-  if (changeStartIndex != null) {
-    cm.cm6.dispatch({ selection: { anchor: changeStartIndex } });
-  }
+  // Note: do not override the cursor here using $changeStart. CM6's undo/redo already
+  // restores the cursor to the correct pre-edit position. $changeStart is set to the
+  // minimum changed position across the entire undo transaction, which includes remapped
+  // external changes (e.g. from an auto-formatter that ran after the user's edit). Those
+  // external changes can start at position 0, which would incorrectly move the cursor to
+  // the top of the file. The vim undo action in vim.js then reads the CM6 cursor and clips
+  // it to valid content bounds, so no additional cursor dispatch is needed here.
 }
 
 var keys: Record<string, (cm: CodeMirror) => void> = {
