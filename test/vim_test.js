@@ -5825,10 +5825,19 @@ async function delay(t) {
   return await new Promise(resolve => setTimeout(resolve, t));
 }
 
-// Regression test: pressing 'u' after an auto-formatter runs should not scroll
-// the cursor to (0,0). The formatter change enters the undo stack; undoing it
-// should place the cursor where it was BEFORE the formatter ran, not at the
-// start of the formatter's change range.
+// Regression test: pressing 'u' after an auto-formatter runs should not jump
+// the cursor to (0,0).
+//
+// How the bug worked (pre-fix):
+//   onChange tracked $changeStart = min(fromB) across all changes in the undo
+//   transaction. A full-document reformat produces an undo transaction that
+//   rewrites the whole file, so fromB = 0 and $changeStart = 0. The old code
+//   then dispatched { selection: { anchor: 0 } }, which physically moved the
+//   cursor to document offset 0 (= line 0, col 0). vim's undo action then read
+//   getCursor('start') = 0 and locked the cursor there via setCursor.
+//
+// The fix removes that dispatch so CM6's undo can correctly restore the cursor
+// to wherever it was before the formatter ran.
 testVim('undo_after_formatter_change', function(cm, vim, helpers) {
   if (isOldCodeMirror) return; // CM6-specific: tests cm.cm6.dispatch behavior
 
@@ -5839,16 +5848,18 @@ testVim('undo_after_formatter_change', function(cm, vim, helpers) {
   helpers.doKeys('r', 'x');
   helpers.assertCursorAt(5, 0);
 
-  // Simulate an auto-formatter that inserts a header comment at the top of the
-  // file. Dispatching without a userEvent annotation means CM6 adds it to the
-  // undo stack normally (it is NOT treated as an external/non-history change).
+  // Simulate an auto-formatter doing a full-document rewrite (the most common
+  // real-world case: prettier, gofmt, rustfmt, etc. all replace the whole file).
+  // This change goes into the undo stack normally and starts at position 0.
+  var docStr = cm.cm6.state.doc.toString();
   cm.cm6.dispatch({
-    changes: { from: 0, to: 0, insert: '// formatted\n' }
+    changes: { from: 0, to: docStr.length, insert: docStr.toUpperCase() }
   });
 
-  // Press 'u': this undoes the formatter's change. The cursor should return to
-  // where it was immediately before the formatter ran (line 5, col 0), NOT to
-  // position 0 (the start of the formatter's inserted text).
+  // Press 'u': undoes the formatter's full-document rewrite. The undo transaction
+  // rewrites from position 0, so $changeStart = 0. The old code dispatched
+  // { anchor: 0 }, moving the cursor to the top. The fix avoids that dispatch,
+  // so the cursor is correctly restored to the pre-formatter position (line 5).
   helpers.doKeys('u');
   helpers.assertCursorAt(5, 0);
 }, { value: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\n' });
