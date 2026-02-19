@@ -5825,6 +5825,34 @@ async function delay(t) {
   return await new Promise(resolve => setTimeout(resolve, t));
 }
 
+// Regression test: pressing 'u' after an auto-formatter runs should not scroll
+// the cursor to (0,0). The formatter change enters the undo stack; undoing it
+// should place the cursor where it was BEFORE the formatter ran, not at the
+// start of the formatter's change range.
+testVim('undo_after_formatter_change', function(cm, vim, helpers) {
+  if (isOldCodeMirror) return; // CM6-specific: tests cm.cm6.dispatch behavior
+
+  // Position cursor on line 5 (well away from the top of the document)
+  cm.setCursor(5, 0);
+
+  // Make a user edit using 'r' (replace single char) — no insert mode needed
+  helpers.doKeys('r', 'x');
+  helpers.assertCursorAt(5, 0);
+
+  // Simulate an auto-formatter that inserts a header comment at the top of the
+  // file. Dispatching without a userEvent annotation means CM6 adds it to the
+  // undo stack normally (it is NOT treated as an external/non-history change).
+  cm.cm6.dispatch({
+    changes: { from: 0, to: 0, insert: '// formatted\n' }
+  });
+
+  // Press 'u': this undoes the formatter's change. The cursor should return to
+  // where it was immediately before the formatter ran (line 5, col 0), NOT to
+  // position 0 (the start of the formatter's inserted text).
+  helpers.doKeys('u');
+  helpers.assertCursorAt(5, 0);
+}, { value: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\n' });
+
 }
 
 var typeKey = function() {
